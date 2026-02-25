@@ -95,7 +95,7 @@
     }
 
     function getIsModerator(payload){
-      console.log(payload);
+      alert(payload);
       const u = payload?.context?.user || {};
       if (toBool(u.moderator)) return true;                    // "true" in your token
       if (toBool(u.security_bypass)) return true;              // treat as privileged

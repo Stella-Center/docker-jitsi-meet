@@ -100,6 +100,7 @@
       if (toBool(u.security_bypass)) return true;              // treat as privileged
       if ((u.role || '').toLowerCase() === 'moderator') return true;
       if ((u.role || '').toLowerCase() === 'owner') return true;
+      if ((u.role || '').toLowerCase() === 'admin') return true;
       if ((u.affiliation || '').toLowerCase() === 'owner') return true;
       if (toBool(payload?.moderator)) return true;             // alternate claim
       return false;

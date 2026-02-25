@@ -10,6 +10,7 @@
     .card{max-width:560px;width:100%;background:#131a2a;border:1px solid #1e2741;border-radius:14px;padding:28px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
     h1{font-size:1.25rem;margin:0 0 .5rem}
     p{opacity:.8;margin:.25rem 0}
+    a{color:#9cc4ff}
   </style>
 </head>
 <body>
@@ -37,14 +38,13 @@
     }
 
     function parseFragment(url){
-      // Turn "#a=b&c=d" or "#config.token=..." into a URLSearchParams
       const hash = url.hash || '';
       const s = hash.startsWith('#') ? hash.slice(1) : hash;
       return new URLSearchParams(s);
     }
 
     function getJWT(){
-      // 1) from referrer query (?jwt=...)
+      // 1) from referrer query (?jwt=... or ?token=...)
       try {
         const ref = new URL(document.referrer);
         const q = ref.searchParams.get('jwt') || ref.searchParams.get('token');
@@ -56,7 +56,6 @@
           fh.get('jwt') ||
           fh.get('token') ||
           fh.get('config.token') ||
-          // Some launchers put it as "config.token=<jwt>" inside the hash-like "config.xxx" params
           (function(){
             for (const [k,v] of fh.entries()){
               if (k.endsWith('token') && v && v.split('.').length === 3) return v;
@@ -66,18 +65,17 @@
         if (fromHash) return fromHash;
       } catch {}
 
-      // 3) localStorage (best-effort; Jitsi usually doesn’t persist the JWT)
+      // 3) localStorage (best-effort)
       const lsKeys = [
-        'jwt',                           // custom
-        'features/base/jwt',             // sometimes used by custom builds
-        'features/base/settings',        // might include token in some forks
-        'token'                          // legacy guesses
+        'jwt',
+        'features/base/jwt',
+        'features/base/settings',
+        'token'
       ];
       for (const k of lsKeys){
         try {
           const raw = localStorage.getItem(k);
           if (!raw) continue;
-          // direct token, or JSON with token field
           if (raw.split('.').length === 3) return raw;
           const obj = JSON.parse(raw);
           if (obj && typeof obj === 'object'){
@@ -94,33 +92,29 @@
       return v === true || v === 'true' || v === 1 || v === '1';
     }
 
-    function getIsModerator(payload){
-      alert(payload);
+    function getIsModeratorFromJWT(payload){
       const u = payload?.context?.user || {};
-      if (toBool(u.moderator)) return true;                    // "true" in your token
-      if (toBool(u.security_bypass)) return true;              // treat as privileged
+      if (toBool(u.moderator)) return true;
+      if (toBool(u.security_bypass)) return true;
       if ((u.role || '').toLowerCase() === 'moderator') return true;
       if ((u.role || '').toLowerCase() === 'owner') return true;
       if ((u.role || '').toLowerCase() === 'admin') return true;
       if ((u.affiliation || '').toLowerCase() === 'owner') return true;
-      if (toBool(payload?.moderator)) return true;             // alternate claim
+      if (toBool(payload?.moderator)) return true;
       return false;
     }
 
     function getDisplayName(payload){
-      // 1) JWT
       const u = payload?.context?.user || {};
       if (u.name) return u.name;
       if (u.displayName) return u.displayName;
 
-      // 2) Referrer param (if you pass userInfo.displayName)
       try {
         const ref = new URL(document.referrer);
         const n = ref.searchParams.get('userInfo.displayName');
         if (n) return n;
       } catch {}
 
-      // 3) LocalStorage (Jitsi settings)
       try {
         const raw = localStorage.getItem('features/base/settings');
         if (raw) {
@@ -129,23 +123,42 @@
         }
       } catch {}
 
-      // 4) Legacy keys
       return localStorage.getItem('displayName') ||
              localStorage.getItem('displayname') || '';
+    }
+
+    function getIsModerator(){
+      // ✅ Preferred: value set by the Jitsi app (middleware) before leaving
+      //   localStorage.setItem('jitsi_is_moderator', '1'|'0')
+      try {
+        const v = localStorage.getItem('jitsi_is_moderator');
+        if (v === '1') return true;
+        if (v === '0') return false;
+      } catch {}
+
+      // Fallback: best-effort from JWT claims (if you happen to have it)
+      const jwt = getJWT();
+      const pay = parseJWT(jwt);
+      return getIsModeratorFromJWT(pay);
     }
 
     function go(){
       const jwt  = getJWT();
       const pay  = parseJWT(jwt);
 
-      const isMod = getIsModerator(pay);
+      const isMod = getIsModerator();
       const name  = getDisplayName(pay);
 
       const u = new URL('https://form.jotform.com/241095885965271');
       u.searchParams.set('isModerator', String(isMod));
       if (name) u.searchParams.set('name', name);
 
+      // Set fallback link
       document.getElementById('fallback').href = u.toString();
+
+      // Optional: clear so it won't leak to future meetings on same origin
+      try { localStorage.removeItem('jitsi_is_moderator'); } catch {}
+
       window.location.replace(u.toString());
     }
 

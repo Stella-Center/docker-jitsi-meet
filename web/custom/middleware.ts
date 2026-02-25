@@ -42,6 +42,8 @@ import {
 import { LoginDialog, WaitForOwnerDialog } from './components';
 import { getTokenAuthUrl, isTokenAuthEnabled } from './functions';
 import logger from './logger';
+import { PARTICIPANT_ROLE_CHANGED } from '../base/participants/actionTypes';
+import { getLocalParticipant } from '../base/participants/functions';
 
 
 /**
@@ -140,6 +142,16 @@ MiddlewareRegistry.register(store => next => action => {
         break;
     }
 
+    case PARTICIPANT_ROLE_CHANGED: {
+        const state = store.getState();
+        const myId = getLocalParticipant(state)?.id;
+
+        if (action.participantId === myId) {
+            _setIsModerator(store, action.role === 'moderator');
+        }
+        break;
+    }
+
     case CONFERENCE_JOINED: {
         const { dispatch, getState } = store;
         const state = getState();
@@ -160,12 +172,14 @@ MiddlewareRegistry.register(store => next => action => {
             store.dispatch(stopWaitForOwner());
         }
         store.dispatch(hideLoginDialog());
+        _syncLocalModeratorFlag(store); // ✅ add this
         break;
     }
 
     case CONFERENCE_LEFT:
         store.dispatch(disableModeratorLogin());
         store.dispatch(stopWaitForOwner());
+        _setIsModerator(store, undefined);
         break;
 
     case CONNECTION_ESTABLISHED:
@@ -357,4 +371,27 @@ function _handleLogout({ dispatch, getState }: IStore) {
     }
 
     dispatch(openLogoutDialog());
+}
+
+
+const LS_KEY = 'jitsi_is_moderator';
+
+function _setIsModerator(store: IStore, isModerator: boolean | undefined) {
+    try {
+        if (typeof isModerator === 'boolean') {
+            localStorage.setItem(LS_KEY, isModerator ? '1' : '0');
+        } else {
+            localStorage.removeItem(LS_KEY);
+        }
+    } catch (_) {
+        // ignore
+    }
+}
+
+function _syncLocalModeratorFlag(store: IStore) {
+    const state = store.getState();
+    const p = getLocalParticipant(state);
+
+    // role is usually 'moderator' | 'participant' (sometimes undefined very early)
+    _setIsModerator(store, p?.role === 'moderator');
 }

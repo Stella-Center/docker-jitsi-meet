@@ -1,11 +1,9 @@
 import { IStore } from '../app/types';
-import { APP_WILL_NAVIGATE } from '../base/app/actionTypes';
 import {
     CONFERENCE_FAILED,
     CONFERENCE_JOINED,
     CONFERENCE_LEFT
 } from '../base/conference/actionTypes';
-import { isRoomValid } from '../base/conference/functions';
 import { CONNECTION_ESTABLISHED, CONNECTION_FAILED } from '../base/connection/actionTypes';
 import { hideDialog } from '../base/dialog/actions';
 import { isDialogOpen } from '../base/dialog/functions';
@@ -35,7 +33,6 @@ import {
     openTokenAuthUrl,
     openWaitForOwnerDialog,
     redirectToDefaultLocation,
-    setTokenAuthUrlSuccess,
     stopWaitForOwner,
     waitForOwner
 } from './actions';
@@ -46,7 +43,7 @@ import logger from './logger';
 
 /**
  * Middleware that captures connection or conference failed errors and controls
- * moderator login availability and {@link LoginDialog}/{@link WaitForOwnerDialog}.
+ * moderator login availability and {@link LoginDialog}.
  *
  * FIXME Some of the complexity was introduced by the lack of dialog stacking.
  *
@@ -98,20 +95,7 @@ MiddlewareRegistry.register(store => next => action => {
         // JitsiConferenceErrors.AUTHENTICATION_REQUIRED.
         let recoverable;
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const [ _lobbyJid, lobbyWaitingForHost ] = error.params || [];
-
-        // 🔴 IMPORTANT FIX:
-        // If we got a members-only error but we're NOT waiting for the host
-        // anymore (lobbyWaitingForHost === false), we must stop the
-        // wait-for-owner cycle and hide the dialog so the lobby is visible.
-        if (error.name === JitsiConferenceErrors.MEMBERS_ONLY_ERROR
-            && typeof lobbyWaitingForHost !== 'undefined'
-            && !lobbyWaitingForHost) {
-
-            store.dispatch(disableModeratorLogin());
-            store.dispatch(stopWaitForOwner());
-            break;
-        }
+        const [ _lobbyJid, lobbyWaitingForHost ] = error.params;
 
         if (error.name === JitsiConferenceErrors.AUTHENTICATION_REQUIRED
             || (error.name === JitsiConferenceErrors.MEMBERS_ONLY_ERROR && lobbyWaitingForHost)) {
@@ -122,14 +106,12 @@ MiddlewareRegistry.register(store => next => action => {
         }
 
         if (error.name === JitsiConferenceErrors.MEMBERS_ONLY_ERROR && lobbyWaitingForHost) {
-            // Waiting in the "moderator login" state (members-only, host not here yet).
             if (recoverable) {
                 store.dispatch(enableModeratorLogin());
             } else {
                 store.dispatch(disableModeratorLogin());
             }
         } else if (error.name === JitsiConferenceErrors.AUTHENTICATION_REQUIRED) {
-            // Classic "wait for owner" flow.
             if (recoverable) {
                 store.dispatch(waitForOwner());
             } else {
@@ -141,26 +123,15 @@ MiddlewareRegistry.register(store => next => action => {
     }
 
     case CONFERENCE_JOINED: {
-        const { dispatch, getState } = store;
-        const state = getState();
-        const config = state['features/base/config'];
-
-        if (isTokenAuthEnabled(config)
-            && config.tokenAuthUrlAutoRedirect
-            && state['features/base/jwt'].jwt) {
-                alert(7);
-            // auto redirect is turned on and we have successfully logged in
-            // let's mark that
-            dispatch(setTokenAuthUrlSuccess(true));
-        }
+        const { dispatch } = store;
 
         if (_isWaitingForModerator(store)) {
-            store.dispatch(disableModeratorLogin());
+            dispatch(disableModeratorLogin());
         }
         if (_isWaitingForOwner(store)) {
-            store.dispatch(stopWaitForOwner());
+            dispatch(stopWaitForOwner());
         }
-        store.dispatch(hideLoginDialog());
+        dispatch(hideLoginDialog());
         break;
     }
 
@@ -203,29 +174,8 @@ MiddlewareRegistry.register(store => next => action => {
         break;
     }
 
-    case APP_WILL_NAVIGATE: {
-        const { dispatch, getState } = store;
-        const state = getState();
-        const config = state['features/base/config'];
-        const room = state['features/base/conference'].room;
-
-        if (isRoomValid(room)
-            && config.tokenAuthUrl && config.tokenAuthUrlAutoRedirect
-            && state['features/authentication'].tokenAuthUrlSuccessful
-            && !state['features/base/jwt'].jwt) {
-            // if we have auto redirect enabled, and we have previously logged in successfully
-            // we will redirect to the auth url to get the token and login again
-            // we want to mark token auth success to false as if login is unsuccessful
-            // the participant can join anonymously and not go in login loop
-            dispatch(setTokenAuthUrlSuccess(false));
-        }
-
-        break;
-    }
-
     case STOP_WAIT_FOR_OWNER:
         _clearExistingWaitForOwnerTimeout(store);
-        // Your version with id + component:
         store.dispatch(hideDialog('WaitForOwnerDialog', WaitForOwnerDialog));
         break;
 
@@ -305,6 +255,7 @@ function _handleLogin({ dispatch, getState }: IStore) {
     const { enabled: audioOnlyEnabled } = state['features/base/audio-only'];
     const audioMuted = isLocalTrackMuted(state['features/base/tracks'], MEDIA_TYPE.AUDIO);
     const videoMuted = isLocalTrackMuted(state['features/base/tracks'], MEDIA_TYPE.VIDEO);
+    const refreshToken = state['features/base/jwt'].refreshToken;
 
     if (!room) {
         logger.warn('Cannot handle login, room is undefined!');
@@ -312,7 +263,7 @@ function _handleLogin({ dispatch, getState }: IStore) {
         return;
     }
 
-    if (!isTokenAuthEnabled(config)) {
+    if (!isTokenAuthEnabled(state)) {
         dispatch(openLoginDialog());
 
         return;
@@ -328,7 +279,8 @@ function _handleLogin({ dispatch, getState }: IStore) {
             videoMuted
         },
         room,
-        tenant
+        tenant,
+        refreshToken
     )
         .then((tokenAuthServiceUrl: string | undefined) => {
             if (!tokenAuthServiceUrl) {

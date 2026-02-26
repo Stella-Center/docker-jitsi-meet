@@ -1,4 +1,4 @@
-FROM jitsi/web:web-1.0.8934-1
+FROM jitsi/web:web-1.0.9069-1
 
 USER root
 

@@ -27,6 +27,7 @@ import {
     UPGRADE_ROLE_FINISHED,
     WAIT_FOR_OWNER
 } from './actionTypes';
+import { PARTICIPANT_ROLE_CHANGED } from '../base/participants/actionTypes';
 import {
     disableModeratorLogin,
     enableModeratorLogin,
@@ -145,6 +146,7 @@ MiddlewareRegistry.register(store => next => action => {
         const state = getState();
         const config = state['features/base/config'];
 
+
         if (isTokenAuthEnabled(config)
             && config.tokenAuthUrlAutoRedirect
             && state['features/base/jwt'].jwt) {
@@ -159,14 +161,56 @@ MiddlewareRegistry.register(store => next => action => {
         if (_isWaitingForOwner(store)) {
             store.dispatch(stopWaitForOwner());
         }
+
+        const redirectUrl = _extractRedirectUrlFromJwt(getState());
+        _persistRedirectUrl(redirectUrl);
+
         store.dispatch(hideLoginDialog());
         break;
     }
 
-    case CONFERENCE_LEFT:
+    case PARTICIPANT_ROLE_CHANGED: {
+        const { getState } = store;
+
+        _persistIsModerator(getState()); // ✅ store again when role changes (host arrives / upgrade)
+        break;
+    }
+
+    case CONFERENCE_LEFT: {
+        const redirectUrl = _getPersistedRedirectUrl();
+
+        // Let Jitsi reducers + other middleware do their teardown/navigation
+        const result = next(action);
+
         store.dispatch(disableModeratorLogin());
         store.dispatch(stopWaitForOwner());
-        break;
+
+        if (redirectUrl) {
+            // Give Jitsi time to finish its own route changes.
+            setTimeout(() => {
+                try {
+                    const target = new URL(redirectUrl, window.location.origin);
+
+                    // Use top-level navigation (important if embedded in iframe/wrapper)
+                    const navWindow: any = (window.top && window.top !== window) ? window.top : window;
+
+                    // Use replace so back button doesn't return to the ended meeting
+                    navWindow.location.replace(target.toString());
+                } catch (e) {
+                    // fall back
+                    try {
+                        window.location.replace(redirectUrl);
+                    } catch (_) {}
+                } finally {
+                    _clearRedirectUrl(); // clear AFTER attempting redirect
+                }
+            }, 600); // <-- key: not 0ms
+        } else {
+            _clearRedirectUrl();
+        }
+
+        return result;
+    }
 
     case CONNECTION_ESTABLISHED:
         store.dispatch(hideLoginDialog());
@@ -357,4 +401,124 @@ function _handleLogout({ dispatch, getState }: IStore) {
     }
 
     dispatch(openLogoutDialog());
+}
+
+
+const IS_MODERATOR_STORAGE_KEY = 'jitsiIsModerator';
+
+function _getIsModeratorFromState(state: any) {
+    const local = state?.['features/base/participants']?.local;
+    return local?.role === 'moderator';
+}
+
+function _persistIsModerator(state: any) {
+    const isModerator = _getIsModeratorFromState(state);
+
+    // Web only (jitsi-meet). Guard so it doesn't crash in non-browser envs.
+    if (typeof window !== 'undefined') {
+        try {
+            window.localStorage.setItem(IS_MODERATOR_STORAGE_KEY, isModerator ? '1' : '0');
+            // Or session only:
+            // window.sessionStorage.setItem(IS_MODERATOR_STORAGE_KEY, isModerator ? '1' : '0');
+        } catch (e) {
+            // ignore storage failures (private mode, blocked storage, etc.)
+        }
+    }
+
+    return isModerator;
+}
+
+
+const REDIRECT_STORAGE_KEY = 'jitsi.redirect_url';
+
+function _extractRedirectUrlFromJwt(state: any): string | undefined {
+    const jwt = state?.['features/base/jwt']?.jwt;
+    if (!jwt) {
+        return;
+    }
+
+    // JWT is 3 parts: header.payload.signature
+    const parts = jwt.split('.');
+    if (parts.length < 2) {
+        return;
+    }
+
+    try {
+        // base64url decode
+        const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const json = decodeURIComponent(
+            atob(payload)
+                .split('')
+                .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+                .join('')
+        );
+
+        const decoded = JSON.parse(json);
+        return decoded?.redirect_url;
+    } catch (e) {
+        return;
+    }
+}
+
+function _persistRedirectUrl(url?: string) {
+    if (!url || typeof window === 'undefined') {
+        return;
+    }
+    try {
+        window.localStorage.setItem(REDIRECT_STORAGE_KEY, url);
+    } catch (e) {
+        // ignore
+    }
+}
+
+function _getPersistedRedirectUrl(): string | undefined {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    try {
+        return window.localStorage.getItem(REDIRECT_STORAGE_KEY) || undefined;
+    } catch (e) {
+        return;
+    }
+}
+
+function _clearRedirectUrl() {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    try {
+        window.localStorage.removeItem(REDIRECT_STORAGE_KEY);
+    } catch (e) {
+        // ignore
+    }
+}
+
+/**
+ * Prevent open-redirects:
+ * - allow only same-origin, OR
+ * - allow only specific hostnames you control.
+ */
+function _safeRedirect(url?: string) {
+    if (!url || typeof window === 'undefined') {
+        return;
+    }
+
+    const allowedHosts = new Set([
+        window.location.hostname,      // same host (optional)
+        'yourapp.com',
+        'staging.yourapp.com',
+        'localhost'
+    ]);
+
+    try {
+        const target = new URL(url, window.location.origin);
+
+        if (!allowedHosts.has(target.hostname)) {
+            return;
+        }
+
+        window.location.assign(target.toString());
+    } catch (e) {
+        // ignore bad URL
+    }
 }

@@ -28,16 +28,6 @@
     try {
       const target = new URL(url, window.location.origin);
 
-      // Optional allowlist (replace with your real domains)
-      const allowed = new Set([
-        'google.com',
-        'meet.stellabrainhealth.com',
-        'app.stellabrainhealth.com',
-        'localhost'
-      ]);
-
-      if (!allowed.has(target.hostname)) return false;
-
       const navWindow = (window.top && window.top !== window) ? window.top : window;
       navWindow.location.replace(target.toString());
       return true;

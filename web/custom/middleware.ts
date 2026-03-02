@@ -136,23 +136,29 @@ MiddlewareRegistry.register(store => next => action => {
 
     case CONFERENCE_JOINED: {
         const result = next(action);
-
         const state = store.getState();
 
-        // Compute from token: moderator ? redirect_url_provider : redirect_url
         const payload = _decodeJwtPayload(state);
-        const isModerator =
-            _getIsModeratorFromState(state)
+
+        // ✅ Use ONLY the JWT flag (what Django set), not live role
+        const isModeratorFromToken =
+            payload?.context?.user?.moderator === true
             || payload?.context?.user?.moderator === 'true'
-            || payload?.context?.user?.moderator === true;
+            || payload?.context?.user?.moderator === 1
+            || payload?.context?.user?.moderator === '1';
 
-        const finalUrl =
-            (isModerator ? payload?.redirect_url_provider : payload?.redirect_url)
-            || payload?.redirect_url
-            || payload?.redirect_url_provider;
+        const client = payload?.redirect_url;
+        const provider = payload?.redirect_url_provider;
 
-        if (finalUrl && typeof window !== 'undefined') {
-            try { localStorage.setItem('jitsi.redirect.final', finalUrl); } catch {}
+        const finalUrl = (isModeratorFromToken ? provider : client) || client || provider;
+
+        if (typeof window !== 'undefined') {
+            try {
+                if (client) localStorage.setItem('jitsi.redirect.client', client);
+                if (provider) localStorage.setItem('jitsi.redirect.provider', provider);
+                localStorage.setItem('jitsiIsModerator', isModeratorFromToken ? '1' : '0');
+                if (finalUrl) localStorage.setItem('jitsi.redirect.final', finalUrl);
+            } catch {}
         }
 
         return result;

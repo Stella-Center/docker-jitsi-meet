@@ -135,31 +135,25 @@ MiddlewareRegistry.register(store => next => action => {
     }
 
     case CONFERENCE_JOINED: {
-        // ✅ Let reducers run first so jwt/participants state is up-to-date.
         const result = next(action);
 
-        const { dispatch, getState } = store;
-        const state = getState();
-        const config = state['features/base/config'];
+        const state = store.getState();
 
-        if (isTokenAuthEnabled(config)
-            && config.tokenAuthUrlAutoRedirect
-            && state['features/base/jwt'].jwt) {
-            dispatch(setTokenAuthUrlSuccess(true));
+        // Compute from token: moderator ? redirect_url_provider : redirect_url
+        const payload = _decodeJwtPayload(state);
+        const isModerator =
+            _getIsModeratorFromState(state)
+            || payload?.context?.user?.moderator === 'true'
+            || payload?.context?.user?.moderator === true;
+
+        const finalUrl =
+            (isModerator ? payload?.redirect_url_provider : payload?.redirect_url)
+            || payload?.redirect_url
+            || payload?.redirect_url_provider;
+
+        if (finalUrl && typeof window !== 'undefined') {
+            try { localStorage.setItem('jitsi.redirect.final', finalUrl); } catch {}
         }
-
-        if (_isWaitingForModerator(store)) {
-            dispatch(disableModeratorLogin());
-        }
-        if (_isWaitingForOwner(store)) {
-            dispatch(stopWaitForOwner());
-        }
-
-        // ✅ Persist moderator + redirect targets (client/provider/final)
-        _persistIsModerator(state);
-        _persistRedirectTargets(state);
-
-        dispatch(hideLoginDialog());
 
         return result;
     }

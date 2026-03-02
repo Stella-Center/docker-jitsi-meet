@@ -21,134 +21,44 @@
     </div>
   </div>
 
-  <script>
-    // ---------- helpers ----------
-    function b64urlDecode(str){
-      try{
-        str = str.replace(/-/g,'+').replace(/_/g,'/');
-        const pad = str.length % 4; if (pad) str += '='.repeat(4 - pad);
-        return decodeURIComponent(escape(atob(str)));
-      }catch(e){ return null; }
-    }
-    function parseJWT(token){
-      if(!token || token.split('.').length < 2) return null;
-      const json = b64urlDecode(token.split('.')[1]);
-      try { return JSON.parse(json); } catch { return null; }
-    }
+<script>
+  function safeNavigate(url) {
+    if (!url) return false;
 
-    function parseFragment(url){
-      // Turn "#a=b&c=d" or "#config.token=..." into a URLSearchParams
-      const hash = url.hash || '';
-      const s = hash.startsWith('#') ? hash.slice(1) : hash;
-      return new URLSearchParams(s);
-    }
+    try {
+      const target = new URL(url, window.location.origin);
 
-    function getJWT(){
-      // 1) from referrer query (?jwt=...)
-      try {
-        const ref = new URL(document.referrer);
-        const q = ref.searchParams.get('jwt') || ref.searchParams.get('token');
-        if (q) return q;
+      // Optional allowlist (replace with your real domains)
+      const allowed = new Set([
+        'google.com',
+        'meet.stellabrainhealth.com',
+        'app.stellabrainhealth.com',
+        'localhost'
+      ]);
 
-        // 2) from referrer hash (#jwt=..., #token=..., #config.token=...)
-        const fh = parseFragment(ref);
-        const fromHash =
-          fh.get('jwt') ||
-          fh.get('token') ||
-          fh.get('config.token') ||
-          // Some launchers put it as "config.token=<jwt>" inside the hash-like "config.xxx" params
-          (function(){
-            for (const [k,v] of fh.entries()){
-              if (k.endsWith('token') && v && v.split('.').length === 3) return v;
-            }
-            return null;
-          })();
-        if (fromHash) return fromHash;
-      } catch {}
+      if (!allowed.has(target.hostname)) return false;
 
-      // 3) localStorage (best-effort; Jitsi usually doesn’t persist the JWT)
-      const lsKeys = [
-        'jwt',                           // custom
-        'features/base/jwt',             // sometimes used by custom builds
-        'features/base/settings',        // might include token in some forks
-        'token'                          // legacy guesses
-      ];
-      for (const k of lsKeys){
-        try {
-          const raw = localStorage.getItem(k);
-          if (!raw) continue;
-          // direct token, or JSON with token field
-          if (raw.split('.').length === 3) return raw;
-          const obj = JSON.parse(raw);
-          if (obj && typeof obj === 'object'){
-            if (obj.token && obj.token.split('.').length === 3) return obj.token;
-            if (obj.jwt   && obj.jwt.split('.').length === 3)   return obj.jwt;
-          }
-        } catch {}
-      }
-
-      return null;
-    }
-
-    function toBool(v){
-      return v === true || v === 'true' || v === 1 || v === '1';
-    }
-
-    function getIsModerator(payload){
-      const u = payload?.context?.user || {};
-      if (toBool(u.moderator)) return true;                    // "true" in your token
-      if (toBool(u.security_bypass)) return true;              // treat as privileged
-      if ((u.role || '').toLowerCase() === 'moderator') return true;
-      if ((u.role || '').toLowerCase() === 'owner') return true;
-      if ((u.affiliation || '').toLowerCase() === 'owner') return true;
-      if (toBool(payload?.moderator)) return true;             // alternate claim
+      const navWindow = (window.top && window.top !== window) ? window.top : window;
+      navWindow.location.replace(target.toString());
+      return true;
+    } catch {
       return false;
     }
+  }
 
-    function getDisplayName(payload){
-      // 1) JWT
-      const u = payload?.context?.user || {};
-      if (u.name) return u.name;
-      if (u.displayName) return u.displayName;
+  (function go() {
+    // ✅ This is the important part
+    let finalUrl;
+    try { finalUrl = localStorage.getItem('jitsi.redirect.final'); } catch {}
 
-      // 2) Referrer param (if you pass userInfo.displayName)
-      try {
-        const ref = new URL(document.referrer);
-        const n = ref.searchParams.get('userInfo.displayName');
-        if (n) return n;
-      } catch {}
+    // try to redirect immediately
+    if (safeNavigate(finalUrl)) return;
 
-      // 3) LocalStorage (Jitsi settings)
-      try {
-        const raw = localStorage.getItem('features/base/settings');
-        if (raw) {
-          const obj = JSON.parse(raw);
-          return obj?.user?.displayName || obj?.displayName || '';
-        }
-      } catch {}
-
-      // 4) Legacy keys
-      return localStorage.getItem('displayName') ||
-             localStorage.getItem('displayname') || '';
-    }
-
-    function go(){
-      const jwt  = getJWT();
-      const pay  = parseJWT(jwt);
-
-      const isMod = getIsModerator(pay);
-      const name  = getDisplayName(pay);
-
-      const u = new URL('https://form.jotform.com/241095885965271');
-      u.searchParams.set('isModerator', String(isMod));
-      if (name) u.searchParams.set('name', name);
-
-      document.getElementById('fallback').href = u.toString();
-      window.location.replace(u.toString());
-    }
-
-    // Give LS a beat to flush on some mobile browsers
-    setTimeout(go, 50);
-  </script>
+    // fallback (your existing behavior)
+    const u = new URL('https://form.jotform.com/241095885965271');
+    document.getElementById('fallback').href = u.toString();
+    window.location.replace(u.toString());
+  })();
+</script>
 </body>
 </html>

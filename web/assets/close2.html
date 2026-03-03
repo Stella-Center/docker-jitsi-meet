@@ -23,32 +23,54 @@
   </div>
 
 <script>
-  // 🔵 Change this to your real Django endpoint
   const DJANGO_POST_CALL_URL = 'https://api.stellabrainhealth.com/jitsi/post-call';
-
-  function getRoomName() {
-    const parts = (window.location.pathname || '')
-      .split('/')
-      .filter(Boolean);
-
-    if (!parts.length) return '';
-
-    const last = parts[parts.length - 1];
-
-    // If URL ends with close2.html → room is previous segment
-    if (last.endsWith('.html') && parts.length >= 2) {
-      return parts[parts.length - 2];
-    }
-
-    return last;
-  }
+  const ROOM_STORAGE_KEY = 'jitsi.roomName'; // optional (fallback)
 
   function getIsModerator() {
+    try { return localStorage.getItem('jitsiIsModerator') === '1'; }
+    catch { return false; }
+  }
+
+  function parseRoomFromUrlString(urlString) {
     try {
-      return localStorage.getItem('jitsiIsModerator') === '1';
+      const u = new URL(urlString);
+      const parts = (u.pathname || '').split('/').filter(Boolean);
+      if (!parts.length) return '';
+
+      // If the last segment is an html file, room is the previous one
+      const last = parts[parts.length - 1];
+      if (last.endsWith('.html') && parts.length >= 2) {
+        return parts[parts.length - 2];
+      }
+
+      // On Jitsi, the room is typically the last path segment
+      return last;
     } catch {
-      return false;
+      return '';
     }
+  }
+
+  function getRoomName() {
+    // 1) Referrer is the meeting URL (best signal)
+    const ref = document.referrer;
+    const fromRef = ref ? parseRoomFromUrlString(ref) : '';
+    if (fromRef && fromRef !== 'static') return fromRef;
+
+    // 2) Stored from inside the meeting app (fallback if you add it)
+    try {
+      const fromLS = localStorage.getItem(ROOM_STORAGE_KEY) || '';
+      if (fromLS) return fromLS;
+    } catch {}
+
+    // 3) Query param fallback if you ever add it: close2.html?room=...
+    try {
+      const u = new URL(window.location.href);
+      const qp = u.searchParams.get('room') || '';
+      if (qp) return qp;
+    } catch {}
+
+    // 4) Last resort: pathname (this is what gave you "static")
+    return parseRoomFromUrlString(window.location.href);
   }
 
   function navigate(url) {
@@ -66,18 +88,14 @@
     const isModerator = getIsModerator() ? '1' : '0';
 
     const u = new URL(DJANGO_POST_CALL_URL);
-    if (room) u.searchParams.set('room', room);
+    u.searchParams.set('room', room || ''); // keep empty if unknown
     u.searchParams.set('isModerator', isModerator);
 
     const target = u.toString();
-
     document.getElementById('fallback').href = target;
 
-    if (!navigate(target)) {
-      window.location.href = target;
-    }
+    if (!navigate(target)) window.location.href = target;
   })();
 </script>
-
 </body>
 </html>

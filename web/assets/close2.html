@@ -10,26 +10,51 @@
     .card{max-width:560px;width:100%;background:#131a2a;border:1px solid #1e2741;border-radius:14px;padding:28px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
     h1{font-size:1.25rem;margin:0 0 .5rem}
     p{opacity:.8;margin:.25rem 0}
+    a{color:#8fb3ff}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <h1>Wrapping up your meeting…</h1>
-      <p>We’re redirecting you to a quick form.</p>
+      <p>We’re redirecting you now.</p>
       <p>If you're not redirected, <a id="fallback" href="#">click here</a>.</p>
     </div>
   </div>
 
 <script>
-  function safeNavigate(url) {
-    if (!url) return false;
+  // 🔵 Change this to your real Django endpoint
+  const DJANGO_POST_CALL_URL = 'https://api.stellabrainhealth.com/jitsi/post-call';
 
+  function getRoomName() {
+    const parts = (window.location.pathname || '')
+      .split('/')
+      .filter(Boolean);
+
+    if (!parts.length) return '';
+
+    const last = parts[parts.length - 1];
+
+    // If URL ends with close2.html → room is previous segment
+    if (last.endsWith('.html') && parts.length >= 2) {
+      return parts[parts.length - 2];
+    }
+
+    return last;
+  }
+
+  function getIsModerator() {
     try {
-      const target = new URL(url, window.location.origin);
+      return localStorage.getItem('jitsiIsModerator') === '1';
+    } catch {
+      return false;
+    }
+  }
 
+  function navigate(url) {
+    try {
       const navWindow = (window.top && window.top !== window) ? window.top : window;
-      navWindow.location.replace(target.toString());
+      navWindow.location.replace(url);
       return true;
     } catch {
       return false;
@@ -37,18 +62,22 @@
   }
 
   (function go() {
-    // ✅ This is the important part
-    let finalUrl;
-    try { finalUrl = localStorage.getItem('jitsi.redirect.final'); } catch {}
+    const room = getRoomName();
+    const isModerator = getIsModerator() ? '1' : '0';
 
-    // try to redirect immediately
-    if (safeNavigate(finalUrl)) return;
+    const u = new URL(DJANGO_POST_CALL_URL);
+    if (room) u.searchParams.set('room', room);
+    u.searchParams.set('isModerator', isModerator);
 
-    // fallback (your existing behavior)
-    const u = new URL('https://form.jotform.com/241095885965271');
-    document.getElementById('fallback').href = u.toString();
-    window.location.replace(u.toString());
+    const target = u.toString();
+
+    document.getElementById('fallback').href = target;
+
+    if (!navigate(target)) {
+      window.location.href = target;
+    }
   })();
 </script>
+
 </body>
 </html>

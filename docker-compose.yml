@@ -1,11 +1,9 @@
-version: '3.5'
 
 services:
     # Frontend
     web:
         build:
-            context: .
-            dockerfile: ./jitsi-meet-custom/Dockerfile
+            context: ./web
         restart: ${RESTART_POLICY:-unless-stopped}
         ports:
             - '${HTTP_PORT}:80'

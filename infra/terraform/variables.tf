@@ -76,3 +76,13 @@ variable "ec2_security_group_id" {
 variable "jvb_nlb_public_ips" {
   type = string
 }
+
+variable "jvb_sentry_dsn" {
+  type = string
+  default = ""
+}
+
+variable "jicofo_sentry_dsn" {
+  type = string
+  default = ""
+}

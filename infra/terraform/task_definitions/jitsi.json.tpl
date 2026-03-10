@@ -359,6 +359,14 @@
             {
                 "name": "GLOBAL_MODULES",
                 "value": "${prosody_plugins}"
+            },
+            {
+                "name": "JVB_SENTRY_DSN",
+                "value": "${jvb_sentry_dsn}"
+            },
+            {
+                "name": "JICOFO_SENTRY_DSN",
+                "value": "${jicofo_sentry_dsn}"
             }
         ],
         "secrets": [

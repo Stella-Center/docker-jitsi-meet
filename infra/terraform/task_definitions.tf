@@ -50,6 +50,8 @@ resource "aws_ecs_task_definition" "jitsi" {
     ecr_web_image_uri           = module.ecr_web.repository_url
     ecr_prosody_image_uri       = module.ecr_prosody.repository_url
     jvb_nlb_public_ips          = var.jvb_nlb_public_ips
+    jvb_sentry_dsn              = var.jvb_sentry_dsn
+    jicofo_sentry_dsn           = var.jicofo_sentry_dsn
   })
 
   volume {
